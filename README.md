@@ -20,7 +20,7 @@
   - **Bot người chơi**: Sở hữu các tính cách đa dạng (*Thận trọng*, *Cân bằng*, *Liều lĩnh*) với thuật toán tính cược và quyết định rút/dằn linh hoạt.
   - **AI Nhà cái (Dealer)**: Tận dụng **đặc quyền Xét bài sớm (Early Check)** để chốt lời các nhà con yếu trước khi quyết định rút thêm đối đầu nhà con mạnh.
 - **Đồ họa lá bài GDI+ độc quyền**: Toàn bộ 52 lá bài mặt ngửa và mặt úp hoa văn casino hoàng gia được vẽ trực tiếp bằng `System.Drawing` (GDI+ chống răng cưa), hoàn toàn không cần asset hình ảnh bên ngoài.
-- **Cơ chế Đổi Cái & Phá sản**: Nhà cái sở hữu quỹ bàn tối thiểu; nếu phá sản sẽ tự động chuyển quyền làm Cái cho người giàu nhất tiếp theo trên bàn.
+- **Cơ chế Chuyển giao quyền làm Cái**: Sau mỗi ván đấu, hệ thống tự động kiểm tra số tiền của tất cả người chơi trong sòng bài (Nhà cái và tất cả Nhà con). Người chơi nào sở hữu **số tiền lớn nhất** sẽ được trao quyền làm **Nhà Cái** cho ván tiếp theo.
 - **Lưu trữ & Thống kê**: Tự động lưu hồ sơ người chơi (`savegame.json`), ghi nhận lịch sử thắng/hòa/thua, tỷ lệ thắng (Win Rate %) với thanh tiến trình trực quan.
 - **Hệ thống phím tắt mượt mà**: Hỗ trợ chơi nhanh bằng bàn phím (`Space`, `Enter`, `H`, `S`).
 
@@ -41,7 +41,7 @@
 | **Tuổi dằn bài Nhà con** | Phải đạt $\ge 16$ điểm mới được phép dằn (nếu dằn non sẽ bị xử thua). |
 | **Tuổi dằn bài Nhà cái** | Đủ tuổi từ $\ge 15$ điểm. |
 | **Xét bài sớm (Early Check)** | Khi đạt $\ge 15$ điểm, Nhà cái có quyền chọn xét bài từng nhà con bất kỳ trước khi rút tiếp. |
-| **Quỹ tối thiểu & Đổi Cái** | Quỹ Nhà cái $\ge \text{Mức cược bàn} \times 20$. Nếu dưới mức này, Nhà cái phá sản và chuyển quyền làm Cái. |
+| **Chuyển giao quyền làm Cái** | Sau mỗi ván, người chơi sở hữu **số tiền lớn nhất** trong sòng bài (Nhà cái + tất cả Nhà con) sẽ nhận quyền làm **Nhà Cái** cho ván kế tiếp. |
 
 ---
 

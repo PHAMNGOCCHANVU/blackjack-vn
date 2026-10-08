@@ -10,7 +10,7 @@ namespace XiDachVN.Engine
         public CardDeck Deck { get; private set; }
         public Player HumanPlayer { get; private set; }
         public List<BotPlayer> Bots { get; private set; } = new List<BotPlayer>();
-        public Player Dealer { get; private set; }
+        public Player Dealer { get; set; }
 
         public int MinBet { get; set; } = 100;
         public int MaxBet => MinBet * 20;
@@ -50,42 +50,64 @@ namespace XiDachVN.Engine
                 Bots.Add(bot);
             }
 
-            // Nhà cái mặc định là một Bot AI hệ thống chuyên làm Cái (với quỹ lớn)
-            // Hoặc có thể là người chơi nếu được chuyển quyền
-            Dealer = new BotPlayer("Nhà Cái (Hệ Thống)", AIBehavior.Normal, humanMoney * 5, isDealer: true);
+            // Nhà cái mặc định ban đầu là một Bot AI chuyên trách làm Cái
+            Dealer = new BotPlayer("Nhà Cái (Hệ Thống)", AIBehavior.Normal, humanMoney * 2, isDealer: true);
 
             CurrentPhase = GamePhase.Waiting;
             OnPhaseChanged?.Invoke(CurrentPhase);
         }
 
         /// <summary>
-        /// Lấy tất cả nhà con tham gia ván (Người chơi + Các Bot)
+        /// Lấy tất cả người chơi có mặt tại sòng bài (Nhà cái và tất cả Nhà con)
         /// </summary>
-        public List<Player> GetAllNonDealerPlayers()
+        public List<Player> GetAllParticipants()
         {
             var list = new List<Player>();
-            if (!HumanPlayer.IsDealer) list.Add(HumanPlayer);
-            foreach (var b in Bots)
+            if (HumanPlayer != null) list.Add(HumanPlayer);
+            if (Bots != null)
             {
-                if (!b.IsDealer) list.Add(b);
+                foreach (var b in Bots)
+                {
+                    if (!list.Contains(b)) list.Add(b);
+                }
+            }
+            if (Dealer != null && !list.Contains(Dealer))
+            {
+                list.Add(Dealer);
             }
             return list;
         }
 
         /// <summary>
-        /// Bắt đầu ván mới: xáo bài, reset bài cũ
+        /// Lấy tất cả nhà con tham gia ván (loại trừ Nhà cái hiện tại)
+        /// </summary>
+        public List<Player> GetAllNonDealerPlayers()
+        {
+            return GetAllParticipants().Where(p => p != Dealer).ToList();
+        }
+
+        /// <summary>
+        /// Bắt đầu ván mới: xáo bài, reset bài cũ của tất cả người chơi
         /// </summary>
         public void StartNewRound()
         {
             Deck.Initialize();
             Deck.Shuffle();
 
-            HumanPlayer.ResetHand();
-            foreach (var b in Bots) b.ResetHand();
-            Dealer.ResetHand();
+            foreach (var p in GetAllParticipants())
+            {
+                p.ResetHand();
+            }
 
             SetPhase(GamePhase.Betting);
-            OnGameMessage?.Invoke("Ván mới bắt đầu. Vui lòng đặt cược!");
+            if (HumanPlayer.IsDealer)
+            {
+                OnGameMessage?.Invoke("Ván mới: Bạn đang làm Nhà Cái! Các nhà con đang đặt cược.");
+            }
+            else
+            {
+                OnGameMessage?.Invoke("Ván mới bắt đầu. Vui lòng đặt cược!");
+            }
         }
 
         /// <summary>
@@ -95,19 +117,26 @@ namespace XiDachVN.Engine
         {
             if (CurrentPhase != GamePhase.Betting) return;
 
-            // Đặt cược cho Human
-            HumanPlayer.Bet = Math.Max(MinBet, Math.Min(humanBet, HumanPlayer.Money));
-
-            // Đặt cược tự động cho Bot
-            foreach (var bot in Bots)
+            // Đặt cược cho Human khi làm Nhà con
+            if (!HumanPlayer.IsDealer)
             {
-                if (!bot.IsDealer)
+                HumanPlayer.Bet = Math.Max(MinBet, Math.Min(humanBet, HumanPlayer.Money));
+                OnGameMessage?.Invoke($"{HumanPlayer.Name} đã cược {HumanPlayer.Bet:#,##0} VNĐ.");
+            }
+            else
+            {
+                HumanPlayer.Bet = 0; // Nhà cái không cược vào bài của mình
+            }
+
+            // Đặt cược tự động cho các Bot làm Nhà con
+            foreach (var p in GetAllNonDealerPlayers())
+            {
+                if (p is BotPlayer bot)
                 {
                     bot.Bet = bot.CalculateBet(MinBet, MaxBet);
                 }
             }
 
-            OnGameMessage?.Invoke($"{HumanPlayer.Name} đã cược {HumanPlayer.Bet:#,##0} VNĐ.");
             SetPhase(GamePhase.Dealing);
         }
 
@@ -195,13 +224,13 @@ namespace XiDachVN.Engine
         /// </summary>
         public HandStatus HumanHit()
         {
-            if (CurrentPhase != GamePhase.PlayerTurn)
-                return ScoreCalculator.GetHandStatus(HumanPlayer.Hand, false);
+            if (CurrentPhase != GamePhase.PlayerTurn && CurrentPhase != GamePhase.DealerTurn)
+                return ScoreCalculator.GetHandStatus(HumanPlayer.Hand, HumanPlayer.IsDealer);
 
             if (HumanPlayer.Hand.Count >= 5)
             {
                 HumanPlayer.IsTurnComplete = true;
-                return ScoreCalculator.GetHandStatus(HumanPlayer.Hand, false);
+                return ScoreCalculator.GetHandStatus(HumanPlayer.Hand, HumanPlayer.IsDealer);
             }
 
             var card = Deck.Draw();
@@ -209,7 +238,7 @@ namespace XiDachVN.Engine
             HumanPlayer.AddCard(card);
             OnCardDealt?.Invoke(HumanPlayer, card);
 
-            var status = ScoreCalculator.GetHandStatus(HumanPlayer.Hand, false);
+            var status = ScoreCalculator.GetHandStatus(HumanPlayer.Hand, HumanPlayer.IsDealer);
             int score = ScoreCalculator.CalculateScore(HumanPlayer.Hand);
 
             if (status == HandStatus.Quac)
@@ -236,13 +265,15 @@ namespace XiDachVN.Engine
         /// </summary>
         public bool HumanStand()
         {
-            if (CurrentPhase != GamePhase.PlayerTurn)
+            if (CurrentPhase != GamePhase.PlayerTurn && CurrentPhase != GamePhase.DealerTurn)
                 return false;
 
             int score = ScoreCalculator.CalculateScore(HumanPlayer.Hand);
-            if (score < 16 && HumanPlayer.Hand.Count < 5)
+            int minStandScore = HumanPlayer.IsDealer ? 15 : 16;
+            if (score < minStandScore && HumanPlayer.Hand.Count < 5)
             {
-                OnGameMessage?.Invoke("Chưa đủ 16 điểm (Chưa đủ tuổi) để dằn bài!");
+                string roleName = HumanPlayer.IsDealer ? "Nhà cái" : "Nhà con";
+                OnGameMessage?.Invoke($"Chưa đủ {minStandScore} điểm ({roleName} chưa đủ tuổi) để dằn bài!");
                 return false;
             }
 
@@ -252,7 +283,7 @@ namespace XiDachVN.Engine
         }
 
         /// <summary>
-        /// Lượt của một Bot cụ thể
+        /// Lượt của một Bot cụ thể khi làm Nhà con
         /// </summary>
         public void ProcessSingleBotTurn(BotPlayer bot)
         {
@@ -300,62 +331,75 @@ namespace XiDachVN.Engine
         }
 
         /// <summary>
-        /// Thực thi lượt Nhà cái và quy trình Xét bài sớm
+        /// Thực thi lượt Nhà cái và quy trình Xét bài sớm / So bài
         /// </summary>
         public void ProcessDealerTurnAndSettle()
         {
             SetPhase(GamePhase.DealerTurn);
             RevealDealerCards();
 
-            // 1. Nếu Nhà cái chưa đủ 15 điểm, bắt buộc phải rút cho đủ tuổi trước
-            while (Dealer.Hand.Count < 5 && DealerAI.MustDraw(ScoreCalculator.CalculateScore(Dealer.Hand), Dealer.Hand.Count))
+            // Trường hợp 1: Nhà cái là Bot AI
+            if (Dealer is BotPlayer botDealer)
             {
-                var card = Deck.Draw();
-                card.IsFaceUp = true;
-                Dealer.AddCard(card);
-                OnCardDealt?.Invoke(Dealer, card);
-            }
-
-            int dealerScore = ScoreCalculator.CalculateScore(Dealer.Hand);
-            var dealerStatus = ScoreCalculator.GetHandStatus(Dealer.Hand, isDealer: true);
-            OnPlayerAction?.Invoke(Dealer, $"Nhà cái hiện có: {ScoreCalculator.GetHandDescription(Dealer.Hand, true)}");
-
-            // 2. Thực hiện xét bài sớm (Early Check) theo thứ tự ưu tiên của DealerAI
-            SetPhase(GamePhase.Comparing);
-            var nonDealers = GetAllNonDealerPlayers();
-            var orderedPlayers = DealerAI.OrderPlayersForEarlyCheck(nonDealers, dealerScore);
-
-            foreach (var player in orderedPlayers)
-            {
-                if (player.IsChecked) continue;
-
-                // Nếu nhà cái chưa Quắc và điểm < 21 và < 5 lá:
-                // Kiểm tra xem AI có muốn rút thêm lá bài trước khi xét người này không
-                if (dealerStatus != HandStatus.Quac && Dealer.Hand.Count < 5)
+                // 1. Rút bài ban đầu nếu chưa đủ 15 điểm
+                while (Dealer.Hand.Count < 5 && DealerAI.MustDraw(ScoreCalculator.CalculateScore(Dealer.Hand), Dealer.Hand.Count))
                 {
-                    bool shouldDrawMore = DealerAI.ShouldDrawBeforeCheckingPlayer(dealerScore, Dealer.Hand.Count, player);
-                    if (shouldDrawMore)
-                    {
-                        var newCard = Deck.Draw();
-                        newCard.IsFaceUp = true;
-                        Dealer.AddCard(newCard);
-                        OnCardDealt?.Invoke(Dealer, newCard);
-
-                        dealerScore = ScoreCalculator.CalculateScore(Dealer.Hand);
-                        dealerStatus = ScoreCalculator.GetHandStatus(Dealer.Hand, isDealer: true);
-                        OnPlayerAction?.Invoke(Dealer, $"Nhà cái rút thêm trước khi xét {player.Name}: {ScoreCalculator.GetHandDescription(Dealer.Hand, true)}");
-                    }
+                    var card = Deck.Draw();
+                    card.IsFaceUp = true;
+                    Dealer.AddCard(card);
+                    OnCardDealt?.Invoke(Dealer, card);
                 }
 
-                // Tiến hành so bài với player này
-                SettleSinglePlayer(player);
+                int dealerScore = ScoreCalculator.CalculateScore(Dealer.Hand);
+                var dealerStatus = ScoreCalculator.GetHandStatus(Dealer.Hand, isDealer: true);
+                OnPlayerAction?.Invoke(Dealer, $"Nhà cái hiện có: {ScoreCalculator.GetHandDescription(Dealer.Hand, true)}");
+
+                // 2. Xét bài sớm (Early Check) theo chiến thuật AI
+                SetPhase(GamePhase.Comparing);
+                var nonDealers = GetAllNonDealerPlayers();
+                var orderedPlayers = DealerAI.OrderPlayersForEarlyCheck(nonDealers, dealerScore);
+
+                foreach (var player in orderedPlayers)
+                {
+                    if (player.IsChecked) continue;
+
+                    // Nếu nhà cái chưa Quắc và điểm < 21: xem xét rút thêm trước khi xét đối thủ này
+                    if (dealerStatus != HandStatus.Quac && Dealer.Hand.Count < 5)
+                    {
+                        bool shouldDrawMore = DealerAI.ShouldDrawBeforeCheckingPlayer(dealerScore, Dealer.Hand.Count, player);
+                        if (shouldDrawMore)
+                        {
+                            var newCard = Deck.Draw();
+                            newCard.IsFaceUp = true;
+                            Dealer.AddCard(newCard);
+                            OnCardDealt?.Invoke(Dealer, newCard);
+
+                            dealerScore = ScoreCalculator.CalculateScore(Dealer.Hand);
+                            dealerStatus = ScoreCalculator.GetHandStatus(Dealer.Hand, isDealer: true);
+                            OnPlayerAction?.Invoke(Dealer, $"Nhà cái rút thêm trước khi xét {player.Name}: {ScoreCalculator.GetHandDescription(Dealer.Hand, true)}");
+                        }
+                    }
+
+                    SettleSinglePlayer(player);
+                }
+            }
+            else
+            {
+                // Trường hợp 2: Nhà cái là Người chơi (HumanPlayer)
+                // Tiến hành so bài với tất cả các Nhà con
+                SetPhase(GamePhase.Comparing);
+                var nonDealers = GetAllNonDealerPlayers();
+                foreach (var player in nonDealers)
+                {
+                    SettleSinglePlayer(player);
+                }
             }
 
             SetPhase(GamePhase.RoundEnd);
         }
 
         /// <summary>
-        /// So bài và thanh toán tiền cho một người chơi cụ thể với Nhà cái
+        /// So bài và thanh toán tiền giữa một Nhà con và Nhà cái
         /// </summary>
         public void SettleSinglePlayer(Player player)
         {
@@ -378,7 +422,6 @@ namespace XiDachVN.Engine
             else if (cmp.Result == GameResult.Lose)
             {
                 winLossAmount = (int)(player.Bet * cmp.PayoutMultiplier);
-                // Giới hạn không bị trừ quá số tiền người chơi có
                 winLossAmount = Math.Min(winLossAmount, player.Money);
                 player.Money -= winLossAmount;
                 Dealer.Money += winLossAmount;
@@ -396,48 +439,52 @@ namespace XiDachVN.Engine
         }
 
         /// <summary>
-        /// Kiểm tra nếu Nhà cái bị phá sản (quỹ < MinBet * 20) và xử lý đổi cái
+        /// Logic luân phiên chuyển giao quyền làm Cái:
+        /// Sau mỗi ván đấu, kiểm tra toàn bộ người chơi trong sòng bài (Nhà cái và tất cả Nhà con).
+        /// Người có số tiền lớn nhất (Money cao nhất) sẽ nhận quyền làm Nhà Cái cho ván tiếp theo.
         /// </summary>
-        public bool CheckDealerBankruptAndHandle(out string message)
+        public bool EvaluateAndTransferDealerRole(out string message)
         {
-            if (Dealer.Money >= DealerMinBank)
+            var all = GetAllParticipants();
+            if (all.Count == 0)
             {
                 message = "";
                 return false;
             }
 
-            // Nhà cái hiện tại bị phá sản!
-            string oldDealerName = Dealer.Name;
+            // Tìm số tiền lớn nhất hiện tại trong sòng bài
+            int maxMoney = all.Max(p => p.Money);
 
-            // Tìm người chơi có số tiền nhiều nhất tiếp theo trên bàn đủ điều kiện làm Cái
-            var eligibleCandidates = GetAllNonDealerPlayers()
-                .Where(p => p.Money >= DealerMinBank)
-                .OrderByDescending(p => p.Money)
-                .ToList();
+            // Danh sách những người chơi có số tiền lớn nhất
+            var richestPlayers = all.Where(p => p.Money == maxMoney).ToList();
 
-            if (eligibleCandidates.Count > 0)
+            // Nếu Nhà cái hiện tại đã là người có số tiền lớn nhất (hoặc đồng hạng nhất)
+            if (richestPlayers.Contains(Dealer))
             {
-                var newDealer = eligibleCandidates[0];
-                var oldDealer = Dealer;
-
-                // Chuyển cờ IsDealer
-                oldDealer.IsDealer = false;
-                newDealer.IsDealer = true;
-                Dealer = newDealer;
-
-                message = $"Nhà cái {oldDealerName} đã phá sản (còn dưới {DealerMinBank:#,##0} VNĐ)! Quyền làm Cái được chuyển sang cho {newDealer.Name} ({newDealer.Money:#,##0} VNĐ)!";
-                OnDealerChanged?.Invoke(oldDealer, newDealer);
-                OnGameMessage?.Invoke(message);
-                return true;
-            }
-            else
-            {
-                // Không ai đủ tiền làm Cái -> Cấp thêm quỹ cứu trợ hoặc rã bàn
-                message = $"Nhà cái {oldDealerName} phá sản và không ai trên bàn đủ quỹ ({DealerMinBank:#,##0} VNĐ) để nhận quyền làm Cái! Bàn chơi sẽ được cấp quỹ cứu trợ.";
-                Dealer.Money += DealerMinBank * 2;
-                OnGameMessage?.Invoke(message);
+                message = $"{Dealer.Name} tiếp tục giữ quyền làm Nhà Cái với số tiền cao nhất ({Dealer.Money:#,##0} VNĐ).";
                 return false;
             }
+
+            // Có người chơi khác có số tiền lớn hơn Nhà cái hiện tại -> Chuyển giao quyền làm Cái!
+            var oldDealer = Dealer;
+            var newDealer = richestPlayers.First();
+
+            oldDealer.IsDealer = false;
+            newDealer.IsDealer = true;
+            Dealer = newDealer;
+
+            message = $"Sau ván đấu, {newDealer.Name} có số tiền lớn nhất ({newDealer.Money:#,##0} VNĐ) nên quyền làm Nhà Cái được chuyển giao cho {newDealer.Name} (thay cho {oldDealer.Name})!";
+            OnDealerChanged?.Invoke(oldDealer, newDealer);
+            OnGameMessage?.Invoke(message);
+            return true;
+        }
+
+        /// <summary>
+        /// Kiểm tra đổi cái tương thích ngược
+        /// </summary>
+        public bool CheckDealerBankruptAndHandle(out string message)
+        {
+            return EvaluateAndTransferDealerRole(out message);
         }
 
         private void SetPhase(GamePhase phase)

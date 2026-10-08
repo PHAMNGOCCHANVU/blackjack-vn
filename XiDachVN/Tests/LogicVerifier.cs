@@ -195,10 +195,19 @@ namespace XiDachVN.Tests
                 Assert(b.IsChecked, $"Test 14f: {b.Name} đã được so bài và thanh toán");
             }
 
-            // Test 15: Cơ chế đổi cái khi nhà cái phá sản
-            engine.Dealer.Money = 1000; // Dưới MinBet * 20 = 20,000
-            bool bankrupt = engine.CheckDealerBankruptAndHandle(out string bankMsg);
-            Assert(bankrupt, "Test 15: Phát hiện nhà cái phá sản và chuyển quyền làm cái");
+            // Test 15: Cơ chế chuyển giao quyền làm Cái cho người có số tiền lớn nhất
+            engine.HumanPlayer.Money = 999999; // Người chơi có tiền cao nhất sòng bài
+            bool transferred = engine.EvaluateAndTransferDealerRole(out string transferMsg);
+            Assert(transferred && engine.Dealer == engine.HumanPlayer && engine.HumanPlayer.IsDealer, "Test 15a: Chuyển quyền làm Cái cho người có số tiền lớn nhất (Human)");
+
+            // Test 15b: Nếu Nhà cái hiện tại vẫn có tiền lớn nhất thì không đổi cái
+            bool transferredAgain = engine.EvaluateAndTransferDealerRole(out string keepMsg);
+            Assert(!transferredAgain && engine.Dealer == engine.HumanPlayer, "Test 15b: Nhà cái giữ quyền khi vẫn có tiền lớn nhất");
+
+            // Test 15c: Một bot vượt lên có tiền lớn hơn -> Quyền làm cái chuyển sang Bot đó
+            engine.Bots[0].Money = 1500000;
+            bool transferredToBot = engine.EvaluateAndTransferDealerRole(out string botMsg);
+            Assert(transferredToBot && engine.Dealer == engine.Bots[0] && engine.Bots[0].IsDealer && !engine.HumanPlayer.IsDealer, "Test 15c: Chuyển quyền làm Cái sang Bot có tiền lớn nhất");
 
             Console.WriteLine($"\n=== KẾT QUẢ KIỂM THỬ: {passed}/{total} BÀI TEST ĐẠT (100% SUCCESS) ===");
         }

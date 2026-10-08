@@ -635,19 +635,27 @@ namespace XiDachVN.Forms
 
         private void UpdateBetDisplay()
         {
-            lblCurrentBetDisplay.Text = $"CƯỢC: {_stagedBet:#,##0} VNĐ";
-            lblHumanBet.Text = $"Cược ván này: {_stagedBet:#,##0} VNĐ";
+            if (_engine != null && _engine.HumanPlayer.IsDealer)
+            {
+                lblCurrentBetDisplay.Text = $"VAI TRÒ: NHÀ CÁI (Quỹ: {_engine.HumanPlayer.Money:#,##0} VNĐ)";
+                lblHumanBet.Text = "Vai trò: Nhà Cái";
+            }
+            else
+            {
+                lblCurrentBetDisplay.Text = $"CƯỢC: {_stagedBet:#,##0} VNĐ";
+                lblHumanBet.Text = $"Cược ván này: {_stagedBet:#,##0} VNĐ";
+            }
         }
 
         private void RefreshAllUI()
         {
             // Human
-            lblHumanName.Text = $"👤 {_engine.HumanPlayer.Name}";
+            lblHumanName.Text = _engine.HumanPlayer.IsDealer ? $"👑 {_engine.HumanPlayer.Name} (NHÀ CÁI)" : $"👤 {_engine.HumanPlayer.Name}";
             lblHumanMoney.Text = $"Ví: {_engine.HumanPlayer.Money:#,##0} VNĐ";
             int humanScore = ScoreCalculator.CalculateScore(_engine.HumanPlayer.Hand);
             lblHumanScore.Text = _engine.HumanPlayer.Hand.Count > 0 ? $"Điểm: {humanScore}" : "Điểm: --";
             lblHumanStatus.Text = _engine.HumanPlayer.ResultNote != "" ? _engine.HumanPlayer.ResultNote :
-                (_engine.HumanPlayer.Hand.Count > 0 ? ScoreCalculator.GetHandDescription(_engine.HumanPlayer.Hand, false) : "Sẵn sàng");
+                (_engine.HumanPlayer.Hand.Count > 0 ? ScoreCalculator.GetHandDescription(_engine.HumanPlayer.Hand, _engine.HumanPlayer.IsDealer) : (_engine.HumanPlayer.IsDealer ? "Đang làm Cái" : "Sẵn sàng"));
             RenderCardsToPanel(flpHumanCards, _engine.HumanPlayer.Hand);
 
             // Dealer
@@ -672,23 +680,24 @@ namespace XiDachVN.Forms
             }
             RenderCardsToPanel(flpDealerCards, _engine.Dealer.Hand);
 
-            // Bots
+            // Các người chơi khác (các Nhà con ngoài HumanPlayer)
+            var otherPlayers = _engine.GetAllNonDealerPlayers().Where(p => p != _engine.HumanPlayer).ToList();
             for (int i = 0; i < 4; i++)
             {
-                if (i < _engine.Bots.Count)
+                if (i < otherPlayers.Count)
                 {
-                    var bot = _engine.Bots[i];
+                    var player = otherPlayers[i];
                     botPanels[i].Visible = true;
-                    botNameLabels[i].Text = bot.Name;
-                    botMoneyLabels[i].Text = $"Tiền: {bot.Money:#,##0}";
-                    botBetLabels[i].Text = $"Cược: {bot.Bet:#,##0}";
+                    botNameLabels[i].Text = player.Name;
+                    botMoneyLabels[i].Text = $"Tiền: {player.Money:#,##0}";
+                    botBetLabels[i].Text = $"Cược: {player.Bet:#,##0}";
 
-                    int bScore = ScoreCalculator.CalculateScore(bot.Hand);
-                    botScoreLabels[i].Text = bot.Hand.Count > 0 ? $"Điểm: {bScore}" : "Điểm: --";
-                    botStatusLabels[i].Text = bot.ResultNote != "" ? bot.ResultNote :
-                        (bot.Hand.Count > 0 ? ScoreCalculator.GetHandDescription(bot.Hand, false) : "Chờ");
+                    int bScore = ScoreCalculator.CalculateScore(player.Hand);
+                    botScoreLabels[i].Text = player.Hand.Count > 0 ? $"Điểm: {bScore}" : "Điểm: --";
+                    botStatusLabels[i].Text = player.ResultNote != "" ? player.ResultNote :
+                        (player.Hand.Count > 0 ? ScoreCalculator.GetHandDescription(player.Hand, false) : "Chờ");
 
-                    RenderCardsToPanel(botCardPanels[i], bot.Hand);
+                    RenderCardsToPanel(botCardPanels[i], player.Hand);
                 }
                 else
                 {
@@ -730,7 +739,7 @@ namespace XiDachVN.Forms
                 RefreshAllUI();
             }
 
-            if (_stagedBet > _engine.HumanPlayer.Money)
+            if (!_engine.HumanPlayer.IsDealer && _stagedBet > _engine.HumanPlayer.Money)
             {
                 _stagedBet = _engine.HumanPlayer.Money;
                 UpdateBetDisplay();
@@ -759,8 +768,27 @@ namespace XiDachVN.Forms
 
             if (roundEndedEarly)
             {
-                // Ván kết thúc sớm do Nhà cái có Xì Bàng/Xì Dách
                 await CompleteRoundAsync();
+                return;
+            }
+
+            // Nếu người chơi là Nhà Cái:
+            if (_engine.HumanPlayer.IsDealer)
+            {
+                // Cho các bot nhà con chơi trước
+                foreach (var bot in _engine.GetAllNonDealerPlayers().OfType<BotPlayer>())
+                {
+                    lblStatusBanner.Text = $"{bot.Name} đang suy nghĩ...";
+                    await Task.Delay(600);
+                    _engine.ProcessSingleBotTurn(bot);
+                    RefreshAllUI();
+                    await Task.Delay(300);
+                }
+
+                // Chuyển sang lượt Nhà cái của Người chơi
+                pnlPlayControls.Visible = true;
+                UpdatePlayerActionButtons();
+                lblStatusBanner.Text = "LƯỢT NHÀ CÁI CỦA BẠN!\nĐủ tuổi từ 15 điểm. Hãy chọn [Rút bài] hoặc [Dằn bài].";
                 return;
             }
 
@@ -774,7 +802,7 @@ namespace XiDachVN.Forms
                 return;
             }
 
-            // Chuyển sang lượt người chơi rút bài
+            // Chuyển sang lượt người chơi rút bài (khi làm Nhà con)
             pnlPlayControls.Visible = true;
             UpdatePlayerActionButtons();
             lblStatusBanner.Text = "LƯỢT CỦA BẠN!\nChọn [Rút bài] hoặc [Dằn bài] (phải >= 16 điểm).";
@@ -788,6 +816,34 @@ namespace XiDachVN.Forms
 
             int score = ScoreCalculator.CalculateScore(_engine.HumanPlayer.Hand);
 
+            if (_engine.HumanPlayer.IsDealer)
+            {
+                // Người chơi đang làm Nhà Cái
+                if (status == HandStatus.Quac)
+                {
+                    SoundManager.Play("bust");
+                    lblStatusBanner.Text = $"Ôi không! Nhà cái bị QUẮC ({score} điểm)!";
+                    pnlPlayControls.Visible = false;
+                    await Task.Delay(800);
+                    _engine.ProcessDealerTurnAndSettle();
+                    await CompleteRoundAsync();
+                }
+                else if (status == HandStatus.NguLinh || _engine.HumanPlayer.Hand.Count >= 5)
+                {
+                    lblStatusBanner.Text = $"Nhà cái đã đạt {score} điểm!";
+                    pnlPlayControls.Visible = false;
+                    await Task.Delay(800);
+                    _engine.ProcessDealerTurnAndSettle();
+                    await CompleteRoundAsync();
+                }
+                else
+                {
+                    UpdatePlayerActionButtons();
+                }
+                return;
+            }
+
+            // Người chơi đang làm Nhà Con
             if (status == HandStatus.Quac)
             {
                 SoundManager.Play("bust");
@@ -823,30 +879,43 @@ namespace XiDachVN.Forms
             {
                 pnlPlayControls.Visible = false;
                 int score = ScoreCalculator.CalculateScore(_engine.HumanPlayer.Hand);
-                lblStatusBanner.Text = $"Bạn đã DẰN BÀI tại {score} điểm.\nĐang xử lý các lượt tiếp theo...";
-                await Task.Delay(500);
-                await ProcessRemainingGameLoopAsync();
+
+                if (_engine.HumanPlayer.IsDealer)
+                {
+                    lblStatusBanner.Text = $"Nhà cái đã DẰN BÀI tại {score} điểm.\nĐang so bài với các nhà con...";
+                    await Task.Delay(600);
+                    _engine.ProcessDealerTurnAndSettle();
+                    await CompleteRoundAsync();
+                }
+                else
+                {
+                    lblStatusBanner.Text = $"Bạn đã DẰN BÀI tại {score} điểm.\nĐang xử lý các lượt tiếp theo...";
+                    await Task.Delay(500);
+                    await ProcessRemainingGameLoopAsync();
+                }
             }
             else
             {
-                MessageBox.Show("Bạn chưa đủ 16 điểm (Chưa đủ tuổi) để dằn bài!", "Cảnh Báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                int minStandScore = _engine.HumanPlayer.IsDealer ? 15 : 16;
+                string roleName = _engine.HumanPlayer.IsDealer ? "Nhà cái" : "Nhà con";
+                MessageBox.Show($"Bạn chưa đủ {minStandScore} điểm ({roleName} chưa đủ tuổi) để dằn bài!", "Cảnh Báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void UpdatePlayerActionButtons()
         {
             int score = ScoreCalculator.CalculateScore(_engine.HumanPlayer.Hand);
-            // Dằn bài chỉ sáng khi >= 16 điểm hoặc đã 5 lá
-            btnStand.Enabled = (score >= 16 || _engine.HumanPlayer.Hand.Count >= 5);
+            int minStandScore = _engine.HumanPlayer.IsDealer ? 15 : 16;
+            btnStand.Enabled = (score >= minStandScore || _engine.HumanPlayer.Hand.Count >= 5);
             btnHit.Enabled = (_engine.HumanPlayer.Hand.Count < 5 && score <= 21);
         }
 
         private async Task ProcessRemainingGameLoopAsync()
         {
-            // 1. Lượt của các Bot
-            foreach (var bot in _engine.Bots)
+            // 1. Lượt của các Bot khi làm Nhà Con
+            foreach (var bot in _engine.GetAllNonDealerPlayers().OfType<BotPlayer>())
             {
-                if (bot.IsDealer || bot.IsTurnComplete) continue;
+                if (bot.IsTurnComplete) continue;
 
                 lblStatusBanner.Text = $"{bot.Name} đang suy nghĩ...";
                 await Task.Delay(600);
@@ -882,16 +951,14 @@ namespace XiDachVN.Forms
             else if (!isDraw) SoundManager.Play("lose");
 
             // Hiển thị ResultDialog
-            var allParticipants = new List<Player> { _engine.HumanPlayer };
-            allParticipants.AddRange(_engine.Bots);
-
+            var allParticipants = _engine.GetAllParticipants();
             var dlg = new ResultDialog(allParticipants, _engine.Dealer);
             var res = dlg.ShowDialog(this);
 
-            // Kiểm tra phá sản Nhà Cái
-            if (_engine.CheckDealerBankruptAndHandle(out string bankMsg))
+            // Kiểm tra chuyển giao quyền làm Cái cho người có số tiền lớn nhất
+            if (_engine.EvaluateAndTransferDealerRole(out string transferMsg))
             {
-                MessageBox.Show(bankMsg, "Đổi Nhà Cái", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(transferMsg, "Chuyển Giao Quyền Làm Cái", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 
             RefreshAllUI();
@@ -906,7 +973,10 @@ namespace XiDachVN.Forms
             // Bật lại panel cược cho ván mới
             pnlPlayControls.Visible = false;
             pnlBetControls.Visible = true;
-            lblStatusBanner.Text = "Ván mới sẵn sàng. Hãy chọn mức cược và nhấn [BẮT ĐẦU VÁN].";
+            UpdateBetDisplay();
+            lblStatusBanner.Text = _engine.HumanPlayer.IsDealer ?
+                "Bạn đang là Nhà Cái! Hãy nhấn [BẮT ĐẦU VÁN] để chia bài." :
+                "Ván mới sẵn sàng. Hãy chọn mức cược và nhấn [BẮT ĐẦU VÁN].";
         }
 
         private void GameForm_KeyDown(object sender, KeyEventArgs e)
