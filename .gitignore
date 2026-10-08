@@ -1,0 +1,48 @@
+## Visual Studio & .NET Build Output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+out/
+
+## Visual Studio Cache & User Files
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+
+## JetBrains Rider & VS Code
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+## Build & Diagnostic Logs
+*.log
+error.log
+*.tlog
+
+## Runtime & Local Game Save Data
+savegame.json
+
+## Crash Dumps & Memory
+*.dmp
+*.mdmp
+
+## OS Generated Files
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+.DS_Store
+
+## Package Cache
+packages/
+*.nupkg
+
+document-rule-game.md
+document.md
+SRS.md
